@@ -6,7 +6,9 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  output: 'standalone',
   images: {
+    domains: ['placeholder.svg'],
     unoptimized: true,
   },
 }

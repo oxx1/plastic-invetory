@@ -4,7 +4,7 @@ import type React from "react"
 
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Plus, Minus, Eye, RotateCcw, Upload, Download, Search, LogOut, Camera } from "lucide-react"
+import { Plus, Minus, Eye, RotateCcw, Upload, Download, Search, LogOut, Quote, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -17,7 +17,6 @@ import { useToast } from "@/components/ui/use-toast"
 import { useAuth } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MobileItemView } from "@/components/mobile-item-view"
-import { BarcodeScanner } from "@/components/barcode-scanner"
 
 interface InventoryItem {
   id: string
@@ -37,8 +36,8 @@ interface LogEntry {
   artikel: string
   location: string
   operation: "add" | "remove"
-  previousStock: number
-  newStock: number
+  previousstock: number // Changed from previousStock
+  newstock: number // Changed from newStock
   user?: string
 }
 
@@ -58,7 +57,61 @@ export default function Dashboard() {
   const [logo, setLogo] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [showMobileDetail, setShowMobileDetail] = useState(false)
-  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
+  const [showQuoteDialog, setShowQuoteDialog] = useState(false)
+  const [showClearDialog, setShowClearDialog] = useState(false) // Declare showClearDialog
+
+  const quotes = [
+    "The best time to check your inventory was 20 years ago. The second best time is now.",
+    "Success is not final, stockout is not fatal: it is the courage to reorder that counts.",
+    "The only way to do great logistics is to love what you move.",
+    "Innovation distinguishes between a warehouse leader and a follower.",
+    "Quality plastic is not an accident. It is always the result of high temperature.",
+    "The future belongs to those who believe in the beauty of their supply chains.",
+    "Excellence is never an accident in molding. It is always the result of high injection pressure.",
+    "Plastic is fantastic when managed responsibly!",
+    "Organization is the key to warehouse efficiency.",
+    "Every logistics expert was once a beginner with a clipboard.",
+    "To be or not to be in stock, that is the question.",
+    "I have a dream that one day all pallets will be stacked equally.",
+    "Ask not what your warehouse can do for you, ask what you can do for your warehouse.",
+    "Float like a forklift, sting like a barcode scanner.",
+    "I think, therefore I am... out of stock.",
+    "Give me liberty, or give me better inventory tracking!",
+    "Houston, we have a logistics problem.",
+    "May the forks be with you.",
+    "I'll be back... with more plastic pellets.",
+    "Show me the inventory!",
+    "Frankly my dear, I don't give a pallet.",
+    "Here's looking at you, SKU.",
+    "You can't handle the truth... about our lead times!",
+    "Life is like a box of plastic parts, you never know what you're gonna mold.",
+    "Keep your friends close, but your suppliers closer.",
+    "The plastic will set you free... from metal alternatives.",
+    "With great inventory comes great responsibility.",
+    "I see dead stock... everywhere.",
+    "Nobody puts plastic in a corner.",
+    "You had me at 'free shipping'.",
+    "E.T. phone warehouse.",
+    "I feel the need... the need for speed in delivery!",
+    "Say hello to my little friend... the injection molding machine.",
+    "There's no place like the warehouse.",
+    "I'm gonna make him an offer he can't refuse... bulk discount.",
+    "Plastic, plastic everywhere, but not a drop to waste.",
+    "It was the best of stock, it was the worst of stock.",
+    "Call me Ishmael... Inventory Manager.",
+    "It is a truth universally acknowledged that a warehouse in possession of good stock must be in want of more space.",
+    "All happy warehouses are alike; each unhappy warehouse is out of stock in its own way.",
+    "To infinity and beyond... our storage capacity!",
+    "The force is strong with this supply chain.",
+    "Winter is coming... better stock up on heating pellets.",
+    "That's one small step for man, one giant leap for logistics.",
+    "We choose to go to the warehouse not because it is easy, but because it is necessary.",
+    "The only thing we have to fear is stockout itself.",
+    "Four score and seven pallets ago...",
+    "Mr. Gorbachev, tear down this warehouse wall!",
+    "I have nothing to offer but blood, toil, tears and plastic.",
+    "Never, never, never give up... on finding that missing SKU.",
+  ]
 
   const { toast } = useToast()
   const router = useRouter()
@@ -158,30 +211,39 @@ export default function Dashboard() {
           }
         }
 
+        // Update local state FIRST for immediate UI feedback
+        setInventory((prev) => prev.map((i) => (i.id === itemId ? updatedItem : i)))
+
         // Update the item in Supabase
         const { error: updateError } = await supabase.from("inventory").update(updatedItem).eq("id", itemId)
 
-        if (updateError) throw updateError
+        if (updateError) {
+          // If database update fails, revert the local state
+          setInventory((prev) => prev.map((i) => (i.id === itemId ? item : i)))
+          throw updateError
+        }
 
-        // Create log entry
-        const logEntry: LogEntry = {
+        // Create log entry (matching database column names)
+        const logEntry = {
           id: Date.now().toString() + Math.random(),
           timestamp: new Date().toISOString(),
           artikel: item.artikel,
           location: location,
           operation: change > 0 ? "add" : "remove",
-          previousStock,
-          newStock,
+          previousstock: previousStock,
+          newstock: newStock,
           user: user?.username,
         }
 
         // Add log entry to Supabase
         const { error: logError } = await supabase.from("logs").insert(logEntry)
 
-        if (logError) throw logError
+        if (logError) {
+          console.error("Log error:", logError)
+          // Don't revert inventory change if only logging fails
+        }
 
-        // Update local state
-        setInventory((prev) => prev.map((i) => (i.id === itemId ? updatedItem : i)))
+        // Update local log state
         setLog((prev) => [logEntry, ...prev])
 
         toast({
@@ -289,55 +351,204 @@ export default function Dashboard() {
     })
   }
 
+  const copyLogToClipboard = async () => {
+    const headers = ["Timestamp", "Artikel", "Location", "Operation", "Previous Stock", "New Stock", "User"]
+    const csvContent = [
+      headers.join(","),
+      ...log.map((entry) =>
+        [
+          new Date(entry.timestamp).toLocaleString(),
+          entry.artikel,
+          entry.location,
+          entry.operation,
+          entry.previousstock,
+          entry.newstock,
+          entry.user || "",
+        ].join(","),
+      ),
+    ].join("\n")
+
+    try {
+      await navigator.clipboard.writeText(csvContent)
+      toast({
+        title: "Log copied to clipboard",
+        description: "Log data has been copied to your clipboard as CSV format.",
+      })
+    } catch (error) {
+      console.error("Failed to copy to clipboard:", error)
+      toast({
+        title: "Copy failed",
+        description: "Could not copy to clipboard. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
   const handleImport = async () => {
     try {
+      console.log("Import started with data:", importData)
+
+      if (!importData.trim()) {
+        toast({
+          title: "Import failed",
+          description: "Please enter some data to import.",
+          variant: "destructive",
+        })
+        return
+      }
+
       const lines = importData.trim().split("\n")
-      const headers = lines[0].split(",")
+      console.log("Lines found:", lines.length)
+
+      if (lines.length < 2) {
+        toast({
+          title: "Import failed",
+          description: "Please provide at least a header row and one data row.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Detect separator (tab or comma)
+      const firstLine = lines[0]
+      const separator = firstLine.includes("\t") ? "\t" : ","
+      console.log("Using separator:", separator === "\t" ? "TAB" : "COMMA")
+
+      const headers = lines[0].split(separator)
+      console.log("Headers:", headers)
+
       const newItems: InventoryItem[] = []
 
       for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(",")
-        if (values.length >= 4) {
-          newItems.push({
-            id: Date.now().toString() + i,
-            artikel: values[0],
-            lagerplats1: values[1],
-            status1: values[2] === "Grön" ? "Grön" : "Röd",
-            lager1: values[2] === "Grön" ? 1 : 0,
+        const values = lines[i].split(separator).map((val) => val.trim())
+        console.log(`Row ${i}:`, values)
+
+        if (values.length >= 2 && values[0] && values[0] !== "") {
+          // Generate unique ID
+          const id = `item_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 9)}`
+
+          // Column mapping for your format:
+          // Column 0: artikal
+          // Column 1: lagerplats1
+          // Column 2: lager1 (stock)
+          // Column 3: lagerplats2
+          // Column 4: lager2 (stock)
+
+          const lager1 = Number.parseInt(values[2]) || 0
+          const lager2 = Number.parseInt(values[4]) || 0
+
+          const newItem: InventoryItem = {
+            id: id,
+            artikel: values[0] || "",
+            lagerplats1: values[1] || "Default",
+            status1: lager1 > 0 ? "Grön" : "Röd",
+            lager1: lager1,
             lagerplats2: values[3] || "",
-            status2: values[4] ? (values[4] === "Grön" ? "Grön" : "Röd") : "",
-            lager2: values[4] === "Grön" ? 1 : 0,
+            status2: values[3] && lager2 > 0 ? "Grön" : values[3] ? "Röd" : "",
+            lager2: lager2,
             streckkod: values[5] || "",
-          })
+          }
+
+          console.log("Created item:", newItem)
+          newItems.push(newItem)
         }
       }
 
-      // Clear existing inventory and insert new items
-      const { error: deleteError } = await supabase.from("inventory").delete().neq("id", "0") // Delete all records
+      console.log("Total items to import:", newItems.length)
 
-      if (deleteError) throw deleteError
+      if (newItems.length === 0) {
+        toast({
+          title: "Import failed",
+          description: "No valid items found. Please check your data format.",
+          variant: "destructive",
+        })
+        return
+      }
 
-      // Insert new items
-      const { error: insertError } = await supabase.from("inventory").insert(newItems)
+      setIsLoading(true)
 
-      if (insertError) throw insertError
+      console.log("Deleting existing items...")
+      const { error: deleteError } = await supabase
+        .from("inventory")
+        .delete()
+        .neq("id", "impossible_id_that_never_exists")
+
+      if (deleteError) {
+        console.error("Delete error:", deleteError)
+        throw deleteError
+      }
+
+      console.log("Inserting new items...")
+      const batchSize = 100
+      for (let i = 0; i < newItems.length; i += batchSize) {
+        const batch = newItems.slice(i, i + batchSize)
+        const { error: insertError } = await supabase.from("inventory").insert(batch)
+
+        if (insertError) {
+          console.error("Insert error:", insertError)
+          throw insertError
+        }
+      }
 
       setInventory(newItems)
       setFilteredInventory(newItems)
       setShowImportDialog(false)
       setImportData("")
+      setIsLoading(false)
 
       toast({
         title: "Import successful",
-        description: `${newItems.length} items have been imported.`,
+        description: `${newItems.length} items have been imported successfully!`,
       })
+
+      console.log("Import completed successfully")
     } catch (error) {
       console.error("Error importing data:", error)
+      setIsLoading(false)
       toast({
         title: "Import failed",
-        description: "Could not import data. Please check the format and try again.",
+        description: `Could not import data: ${error.message || "Unknown error"}. Check console for details.`,
         variant: "destructive",
       })
+    }
+  }
+
+  const handleClearAll = async () => {
+    try {
+      setIsLoading(true)
+
+      // Clear inventory
+      const { error: inventoryError } = await supabase
+        .from("inventory")
+        .delete()
+        .neq("id", "impossible_id_that_never_exists")
+
+      if (inventoryError) throw inventoryError
+
+      // Clear logs
+      const { error: logsError } = await supabase.from("logs").delete().neq("id", "impossible_id_that_never_exists")
+
+      if (logsError) throw logsError
+
+      // Update local state
+      setInventory([])
+      setFilteredInventory([])
+      setLog([])
+      setShowClearDialog(false)
+
+      toast({
+        title: "All data cleared",
+        description: "All inventory items and logs have been deleted.",
+      })
+    } catch (error) {
+      console.error("Error clearing data:", error)
+      toast({
+        title: "Error clearing data",
+        description: "Could not clear all data. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -415,21 +626,20 @@ export default function Dashboard() {
     setShowMobileDetail(true)
   }
 
-  const handleBarcodeScan = (code: string) => {
-    // Find item with matching barcode
-    const item = inventory.find((item) => item.streckkod === code)
+  const getRandomQuote = () => {
+    return quotes[Math.floor(Math.random() * quotes.length)]
+  }
 
-    if (item) {
-      setSelectedItem(item)
-      setShowMobileDetail(true)
-      setShowBarcodeScanner(false)
-    } else {
-      toast({
-        title: "Item not found",
-        description: `No item found with barcode: ${code}`,
-        variant: "destructive",
-      })
+  // Get current stock for selected item and location
+  const getCurrentStock = () => {
+    if (!selectedItem || !selectedLocation) return 0
+
+    if (selectedLocation === selectedItem.lagerplats1) {
+      return selectedItem.lager1
+    } else if (selectedLocation === selectedItem.lagerplats2) {
+      return selectedItem.lager2
     }
+    return 0
   }
 
   if (!user) {
@@ -442,35 +652,16 @@ export default function Dashboard() {
       <div className="container mx-auto p-4 md:p-6 space-y-4 md:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="relative group">
+            <div className="relative">
               {logo ? (
-                <div className="w-12 h-12 rounded-lg overflow-hidden shadow-lg bg-white border-2 border-gray-200">
+                <div className="w-16 h-16 rounded-lg overflow-hidden shadow-lg bg-white border-2 border-gray-200">
                   <img src={logo || "/placeholder.svg"} alt="Company Logo" className="w-full h-full object-contain" />
                 </div>
               ) : (
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg">
+                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg">
                   <span className="text-white font-bold text-xl">PF</span>
                 </div>
               )}
-              <div className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" id="logo-upload" />
-                <label
-                  htmlFor="logo-upload"
-                  className="w-6 h-6 bg-blue-500 text-white rounded-full flex items-center justify-center cursor-pointer hover:bg-blue-600 text-xs"
-                  title="Upload logo"
-                >
-                  +
-                </label>
-                {logo && (
-                  <button
-                    onClick={removeLogo}
-                    className="w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center cursor-pointer hover:bg-red-600 text-xs ml-1"
-                    title="Remove logo"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
             </div>
             <div>
               <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
@@ -496,6 +687,20 @@ export default function Dashboard() {
               <Eye className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
               Log
             </Button>
+            <Button variant="outline" onClick={() => setShowQuoteDialog(true)} className="shadow-sm text-xs md:text-sm">
+              <Quote className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
+              Quote
+            </Button>
+            {user?.role === "admin" && (
+              <Button
+                variant="destructive"
+                onClick={() => setShowClearDialog(true)}
+                className="shadow-sm text-xs md:text-sm"
+              >
+                <Trash2 className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
+                Clear All
+              </Button>
+            )}
             <Button variant="outline" onClick={handleLogout} className="shadow-sm text-xs md:text-sm">
               <LogOut className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
               Logout
@@ -537,18 +742,17 @@ export default function Dashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Artikel</TableHead>
-                      <TableHead>Lagerplats 1</TableHead>
-                      <TableHead>Status 1</TableHead>
-                      <TableHead className="hidden sm:table-cell">Lagerplats 2</TableHead>
-                      <TableHead className="hidden sm:table-cell">Status 2</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableHead className="w-1/3">Artikel</TableHead>
+                      <TableHead className="w-1/3">Lagerplats</TableHead>
+                      <TableHead className="w-8 px-1">L1</TableHead>
+                      <TableHead className="w-8 px-1">L2</TableHead>
+                      <TableHead className="w-16">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {isLoading ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8">
+                        <TableCell colSpan={5} className="text-center py-8">
                           <div className="flex justify-center items-center">
                             <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-blue-500"></div>
                             <span className="ml-2">Loading...</span>
@@ -557,7 +761,7 @@ export default function Dashboard() {
                       </TableRow>
                     ) : filteredInventory.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8">
+                        <TableCell colSpan={5} className="text-center py-8">
                           No inventory items found
                         </TableCell>
                       </TableRow>
@@ -573,33 +777,38 @@ export default function Dashboard() {
                           }}
                         >
                           <TableCell className="font-medium">{item.artikel}</TableCell>
-                          <TableCell>{item.lagerplats1}</TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={item.status1 === "Grön" ? "default" : "destructive"}
-                              className={item.status1 === "Grön" ? "bg-green-500 hover:bg-green-600" : ""}
-                            >
-                              {item.lager1 > 0 ? "I lager" : "Slut!"}
-                            </Badge>
+                          <TableCell className="text-xs">
+                            <div>{item.lagerplats1}</div>
+                            {item.lagerplats2 && <div className="text-gray-500">{item.lagerplats2}</div>}
                           </TableCell>
-                          <TableCell className="hidden sm:table-cell">{item.lagerplats2 || "-"}</TableCell>
-                          <TableCell className="hidden sm:table-cell">
-                            {item.lagerplats2 && item.lagerplats2.trim() !== "" ? (
-                              <Badge
-                                variant={item.status2 === "Grön" ? "default" : "destructive"}
-                                className={item.status2 === "Grön" ? "bg-green-500 hover:bg-green-600" : ""}
-                              >
-                                {item.lager2 > 0 ? "I lager" : "Slut!"}
-                              </Badge>
+                          <TableCell className="px-1">
+                            <div
+                              className={`w-3 h-3 rounded-full ${
+                                item.status1 === "Grön" ? "bg-green-500" : "bg-red-500"
+                              }`}
+                              title={`${item.lagerplats1}: ${item.lager1}`}
+                            ></div>
+                          </TableCell>
+                          <TableCell className="px-1">
+                            {item.lagerplats2 ? (
+                              <div
+                                className={`w-3 h-3 rounded-full ${
+                                  item.status2 === "Grön" ? "bg-green-500" : "bg-red-500"
+                                }`}
+                                title={`${item.lagerplats2}: ${item.lager2}`}
+                              ></div>
                             ) : (
-                              "-"
+                              <div className="w-3 h-3 rounded-full bg-gray-200"></div>
                             )}
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-2">
                               <Button
                                 size="sm"
-                                onClick={() => handleStockOperation(item, "add")}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleStockOperation(item, "add")
+                                }}
                                 className="h-8 w-8 p-0"
                               >
                                 <Plus className="h-4 w-4" />
@@ -607,7 +816,10 @@ export default function Dashboard() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => handleStockOperation(item, "remove")}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleStockOperation(item, "remove")
+                                }}
                                 className="h-8 w-8 p-0"
                               >
                                 <Minus className="h-4 w-4" />
@@ -639,19 +851,35 @@ export default function Dashboard() {
                   <Button
                     variant={selectedLocation === selectedItem?.lagerplats1 ? "default" : "outline"}
                     onClick={() => setSelectedLocation(selectedItem?.lagerplats1 || "")}
-                    className="w-full justify-start"
+                    className="w-full justify-between"
                   >
-                    {selectedItem?.lagerplats1}
+                    <span>{selectedItem?.lagerplats1}</span>
+                    <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded-md text-xs">
+                      Current: {selectedItem?.lager1 || 0}
+                    </span>
                   </Button>
                   {selectedItem?.lagerplats2 && (
                     <Button
                       variant={selectedLocation === selectedItem?.lagerplats2 ? "default" : "outline"}
                       onClick={() => setSelectedLocation(selectedItem?.lagerplats2 || "")}
-                      className="w-full justify-start"
+                      className="w-full justify-between"
                     >
-                      {selectedItem?.lagerplats2}
+                      <span>{selectedItem?.lagerplats2}</span>
+                      <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded-md text-xs">
+                        Current: {selectedItem?.lager2 || 0}
+                      </span>
                     </Button>
                   )}
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="text-sm">
+                  <span className="font-medium">Current stock: </span>
+                  <span className="font-bold">{getCurrentStock()}</span>
+                  <span className="ml-2 font-medium">New stock: </span>
+                  <span className="font-bold">
+                    {operationType === "add" ? getCurrentStock() + 1 : Math.max(0, getCurrentStock() - 1)}
+                  </span>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -686,36 +914,37 @@ export default function Dashboard() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Artikel</TableHead>
-                        <TableHead>Lagerplats 1</TableHead>
-                        <TableHead>Status 1</TableHead>
-                        <TableHead>Lagerplats 2</TableHead>
-                        <TableHead>Status 2</TableHead>
+                        <TableHead>Lagerplats</TableHead>
+                        <TableHead>L1</TableHead>
+                        <TableHead>L2</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {getEmptyItems().map((item) => (
                         <TableRow key={item.id}>
                           <TableCell>{item.artikel}</TableCell>
-                          <TableCell>{item.lagerplats1}</TableCell>
                           <TableCell>
-                            <Badge
-                              variant={item.status1 === "Grön" ? "default" : "destructive"}
-                              className={item.status1 === "Grön" ? "bg-green-500 hover:bg-green-600" : ""}
-                            >
-                              {item.lager1 > 0 ? "I lager" : "Slut!"}
-                            </Badge>
+                            <div>{item.lagerplats1}</div>
+                            {item.lagerplats2 && <div className="text-gray-500">{item.lagerplats2}</div>}
                           </TableCell>
-                          <TableCell>{item.lagerplats2 || "-"}</TableCell>
                           <TableCell>
-                            {item.lagerplats2 && item.lagerplats2.trim() !== "" ? (
-                              <Badge
-                                variant={item.status2 === "Grön" ? "default" : "destructive"}
-                                className={item.status2 === "Grön" ? "bg-green-500 hover:bg-green-600" : ""}
-                              >
-                                {item.lager2 > 0 ? "I lager" : "Slut!"}
-                              </Badge>
+                            <div
+                              className={`w-3 h-3 rounded-full ${
+                                item.status1 === "Grön" ? "bg-green-500" : "bg-red-500"
+                              }`}
+                              title={`${item.lagerplats1}: ${item.lager1}`}
+                            ></div>
+                          </TableCell>
+                          <TableCell>
+                            {item.lagerplats2 ? (
+                              <div
+                                className={`w-3 h-3 rounded-full ${
+                                  item.status2 === "Grön" ? "bg-green-500" : "bg-red-500"
+                                }`}
+                                title={`${item.lagerplats2}: ${item.lager2}`}
+                              ></div>
                             ) : (
-                              "-"
+                              <div className="w-3 h-3 rounded-full bg-gray-200"></div>
                             )}
                           </TableCell>
                         </TableRow>
@@ -742,16 +971,19 @@ export default function Dashboard() {
                 </p>
                 <Textarea
                   id="import-data"
-                  placeholder="Artikel,Lagerplats 1,Status 1,Lagerplats 2,Status 2,Streckkod
-Art123,Lager1,Grön,Lager2,Grön,1234
-Art456,Lager3,Röd,,,C1800000000645"
+                  placeholder="artikal	lagerplats1	lager1	lagerplats2	lager2
+4,0 x 750		1		0
+4.0 x 750		1		0
+4.0 x 800		1		0"
                   value={importData}
                   onChange={(e) => setImportData(e.target.value)}
                   className="min-h-32"
                 />
               </div>
               <div className="flex gap-2">
-                <Button onClick={handleImport}>Import</Button>
+                <Button onClick={handleImport} disabled={isLoading || !importData.trim()}>
+                  {isLoading ? "Importing..." : "Import"}
+                </Button>
                 <Button variant="outline" onClick={() => setShowImportDialog(false)}>
                   Cancel
                 </Button>
@@ -801,8 +1033,8 @@ Art456,Lager3,Röd,,,C1800000000645"
                               {entry.operation === "add" ? "Added" : "Removed"}
                             </Badge>
                           </TableCell>
-                          <TableCell>{entry.previousStock}</TableCell>
-                          <TableCell>{entry.newStock}</TableCell>
+                          <TableCell>{entry.previousstock}</TableCell>
+                          <TableCell>{entry.newstock}</TableCell>
                           <TableCell>{entry.user || "-"}</TableCell>
                         </TableRow>
                       ))}
@@ -811,7 +1043,11 @@ Art456,Lager3,Röd,,,C1800000000645"
                 </div>
               )}
             </div>
-            <div className="flex justify-end">
+            <div className="flex justify-between">
+              <Button variant="outline" onClick={copyLogToClipboard} disabled={log.length === 0}>
+                <Download className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
+                Copy Log
+              </Button>
               <Button variant="outline" onClick={() => setShowLogDialog(false)}>
                 Close
               </Button>
@@ -837,14 +1073,13 @@ Art456,Lager3,Röd,,,C1800000000645"
           </DialogContent>
         </Dialog>
 
-        {/* Keyboard shortcuts info */}
+        {/* Private use notice */}
         <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
           <CardContent className="pt-4 md:pt-6 text-center">
-            <div className="text-xs md:text-sm text-muted-foreground">
-              <strong>Keyboard Shortcuts:</strong> K (Add stock) • L (Remove stock) • E (Show empty) • R (Refresh)
-            </div>
+            <div className="text-xs md:text-sm text-muted-foreground italic">detta är för privat bruk ;)</div>
           </CardContent>
         </Card>
+
         {/* Mobile Bottom Navigation */}
         <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 flex justify-around items-center z-50">
           <Button
@@ -863,11 +1098,11 @@ Art456,Lager3,Röd,,,C1800000000645"
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setShowBarcodeScanner(true)}
+            onClick={() => setShowQuoteDialog(true)}
             className="flex flex-col items-center"
           >
-            <Camera className="h-5 w-5" />
-            <span className="text-xs mt-1">Scan</span>
+            <Quote className="h-5 w-5" />
+            <span className="text-xs mt-1">Quote</span>
           </Button>
           <Button
             variant="ghost"
@@ -880,10 +1115,43 @@ Art456,Lager3,Röd,,,C1800000000645"
           </Button>
         </div>
 
-        {/* Barcode Scanner Dialog */}
-        <Dialog open={showBarcodeScanner} onOpenChange={setShowBarcodeScanner}>
-          <DialogContent className="sm:max-w-md p-0">
-            <BarcodeScanner onScan={handleBarcodeScan} onClose={() => setShowBarcodeScanner(false)} />
+        {/* Quote of the Day Dialog */}
+        <Dialog open={showQuoteDialog} onOpenChange={setShowQuoteDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>💡 Quote of the Day</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="text-center p-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg">
+                <p className="text-lg italic text-gray-700 leading-relaxed">"{getRandomQuote()}"</p>
+              </div>
+              <div className="flex justify-center">
+                <Button onClick={() => setShowQuoteDialog(false)}>Close</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Clear All Confirmation Dialog */}
+        <Dialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>⚠️ Clear All Data</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                This will permanently delete ALL inventory items and logs. This action cannot be undone.
+              </p>
+              <p className="text-sm font-medium text-red-600">Are you absolutely sure you want to continue?</p>
+              <div className="flex gap-2">
+                <Button variant="destructive" onClick={handleClearAll} disabled={isLoading}>
+                  {isLoading ? "Clearing..." : "Yes, Clear All Data"}
+                </Button>
+                <Button variant="outline" onClick={() => setShowClearDialog(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
           </DialogContent>
         </Dialog>
 

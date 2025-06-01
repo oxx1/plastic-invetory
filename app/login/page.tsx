@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle } from "lucide-react"
+import { supabase } from "@/lib/supabase"
 
 export default function LoginPage() {
   const [username, setUsername] = useState("")
@@ -18,6 +19,22 @@ export default function LoginPage() {
   const [error, setError] = useState("")
   const router = useRouter()
   const { login, isLoading } = useAuth()
+  const [logo, setLogo] = useState<string | null>(null)
+
+  // Load logo from Supabase on mount
+  useEffect(() => {
+    const fetchLogo = async () => {
+      try {
+        const { data: logoData } = await supabase.from("settings").select("value").eq("key", "company_logo").single()
+        if (logoData) {
+          setLogo(logoData.value)
+        }
+      } catch (error) {
+        console.error("Error fetching logo:", error)
+      }
+    }
+    fetchLogo()
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -40,8 +57,8 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50 p-4">
       <Card className="w-full max-w-md shadow-lg border-0 bg-white/90 backdrop-blur-sm">
         <CardHeader className="space-y-1 text-center">
-          <div className="mx-auto w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg mb-4">
-            <span className="text-white font-bold text-2xl">PF</span>
+          <div className="mx-auto w-32 h-32 rounded-lg overflow-hidden shadow-lg bg-white border-2 border-gray-200 mb-4">
+            <img src={logo || "/placeholder.svg"} alt="Company Logo" className="w-full h-full object-contain" />
           </div>
           <CardTitle className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
             Plastic Is Fantastic
